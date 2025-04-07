@@ -1,51 +1,58 @@
-const byte interruptPin = 21;
-
-const int IMPULSE_N = 100;
-long int times[IMPULSE_N];
-int current_impulse_num = 0;
-long int impulse_sum = 0;
-long long prev_micros = 0;
-bool isOdd = false;
-bool isFinal = false;
-
+volatile uint32_t lastMicros = 0;
+volatile uint32_t intervalSum = 0;
+volatile uint32_t intervalSquaredSum = 0;
+volatile unsigned int sampleCnt = 0;
+const unsigned int maxSamples = 40;
+ 
 void setup() {
-  pinMode(interruptPin, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(interruptPin), onHigh, HIGH);
-  Serial.begin(9600);
+  Serial.begin(115200);
+  pinMode(21, INPUT);
+  attachInterrupt(digitalPinToInterrupt(21), measureInterval, CHANGE);
 }
-
+ 
 void loop() {
-  if (isFinal) {
-    double math_expect = (float)impulse_sum / IMPULSE_N;
-    double dispersion = 0.0f;
-    for (int i = 0; i < IMPULSE_N; ++i) {
-      dispersion += (times[i] - math_expect) * (times[i] - math_expect);
-    }
-    dispersion /= IMPULSE_N;
+  if (sampleCnt >= maxSamples) {
+    noInterrupts();
+    uint32_t sum = intervalSum;
+    uint32_t squaredSum = intervalSquaredSum;
+    unsigned int count = sampleCnt;
+    intervalSum = 0;
+    intervalSquaredSum = 0;
+    sampleCnt = 0;
+    interrupts();
+ 
+    uint32_t mean =  sum / count;
+    uint32_t variance = (squaredSum / count) - (mean * mean);
+    uint32_t stdDev = sqrt(variance);
+ 
+    Serial.print("Mean: ");
+    Serial.print(mean);
+    Serial.print(" us, SquaredSum: ");
+    Serial.print(squaredSum);
+    Serial.print(" us, Count: ");
+    Serial.print(count);
+    Serial.print(" us, mean^2: ");
+    Serial.print(mean * mean);
+    Serial.print(" us, variance: ");
+    Serial.print(variance);
+    Serial.print(" us, StdDev: ");
+    Serial.print(stdDev);
+    Serial.println(" us");
     
-    isFinal = false;
-    Serial.print(math_expect);
-    Serial.print(" ");
-    Serial.println(sqrt(dispersion));
   }
 }
-
-void onHigh() {
-  if (current_impulse_num >= IMPULSE_N) {
-    isFinal = true;
-    return;
+ 
+ 
+void measureInterval() {
+  unsigned long curMicros = micros();
+  if(lastMicros)
+  {
+    unsigned long interval = curMicros - lastMicros;
+ 
+    intervalSum += interval;
+    intervalSquaredSum += interval * interval;
+    sampleCnt++;
   }
-  
-  if (isOdd) {
-    long long current_micros = micros();
-    times[current_impulse_num] = current_micros - prev_micros;
-    impulse_sum += times[current_impulse_num];
-    prev_micros = current_micros;
-    ++current_impulse_num;
-  }
-  else {
-    prev_micros = micros();
-  }
-
-  isOdd = !isOdd;
+ 
+  lastMicros = curMicros;
 }
